@@ -39,6 +39,7 @@ async function run() {
     assert.equal(await page.locator('#library .clip-card').count(),0);
     await page.locator('#eventFilter').selectOption('Point');
     await page.locator('#library [data-edit]').click();
+    await page.locator('#cancel:visible').waitFor();
     assert.equal(await page.locator('#setterZone').inputValue(),'6');
     await page.locator('#preview').click();
     await page.waitForFunction(()=>document.querySelector('video').currentTime>0.15);
