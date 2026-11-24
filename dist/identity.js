@@ -5,7 +5,7 @@ const PlayerIdentity = (() => {
   const colorDistance=(a,b)=>Math.hypot(...a.map((value,i)=>value-b[i]));
   function createTracker(){
     let active=[], next=1;
-    return function observe(pixels,prev,w,h,t,ball){
+    function observe(pixels,prev,w,h,t,ball){
       const candidates=[];
       const stride=Math.max(4,Math.round(w/35));
       for(let y=stride;y<h-stride*2;y+=stride) for(let x=stride;x<w-stride;x+=stride){
@@ -20,7 +20,7 @@ const PlayerIdentity = (() => {
         if(changed/count<0.2)continue;
         candidates.push({x:(x+stride/2)/w,y:(y+stride)/h,color:[r/changed,g/changed,b/changed],motion:changed/count});
       }
-      if(candidates.length>100){active=[];return null;}
+      if(candidates.length>100){active=[];observe.visible=[];return null;}
       const bodies=[];
       for(const c of candidates.sort((a,b)=>b.motion-a.motion)){
         if(!bodies.some(p=>Math.hypot(c.x-p.x,c.y-p.y)<0.09))bodies.push(c);
@@ -37,12 +37,15 @@ const PlayerIdentity = (() => {
         used.add(c.id);
       }
       active=bodies.concat(recent.filter(p=>!used.has(p.id)));
+      observe.visible=bodies.filter(p=>p.frames>=3).map(({id,x,y})=>({id,x,y}));
       if(!ball)return null;
       const nearby=bodies.filter(p=>p.frames>=3).map(p=>({p,d:Math.hypot(p.x-ball.x,(p.y-ball.y-0.045)*0.8)}))
         .filter(m=>m.d<0.13).sort((a,b)=>a.d-b.d);
       if(!nearby.length || (nearby[1] && nearby[1].d-nearby[0].d<0.035))return null;
       return nearby[0].p.id;
-    };
+    }
+    observe.visible=[];
+    return observe;
   }
   function roleHint(contacts){
     const confirmed=contacts.filter(p=>!p.suggested);

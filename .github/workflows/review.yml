@@ -15,4 +15,13 @@ jobs:
       - run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
       - run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
       - run: ffmpeg -v error -f lavfi -i testsrc2=size=320x180:rate=15:duration=4 -c:v libvpx -b:v 250k /tmp/test.webm
-      - run: node browser-test.cjs /tmp/test.webm
+      - name: Check ball tracking on indoor rally and clip workflow
+        run: |
+          set -euo pipefail
+          base=https://raw.githubusercontent.com/asigatchov/fast-volleyball-tracking-inference/c3864156a4dfbd5af3f00f427ab0fc4bfe7af5b5/examples
+          curl -fsSL --retry 3 "$base/gtu_20250316_002.mp4" -o /tmp/rally.mp4
+          curl -fsSL --retry 3 "$base/gtu_20250316_002_predict_ball.csv" -o /tmp/reference.csv
+          readarray -t dimensions < <(ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate -of default=nw=1:nk=1 /tmp/rally.mp4)
+          fps=$(awk -F/ '{print $1/$2}' <<< "${dimensions[2]}")
+          ffmpeg -v error -i /tmp/rally.mp4 -t 3 -an -vf scale=960:-2 -c:v libvpx -b:v 2M /tmp/rally.webm
+          node browser-test.cjs /tmp/test.webm /tmp/rally.webm /tmp/reference.csv "$fps" "${dimensions[0]}" "${dimensions[1]}"

@@ -4,7 +4,7 @@
   let scanning = false;
   let windows = [];
   let selectedWindow = null;
-  let track=[];
+  let track=[], playerFrames=[];
   let scanMedia=null;
   let coverage='';
   for(const id of ['lead','tail']){
@@ -20,16 +20,29 @@
   $('stage').append(overlay);
   function paintBall(){
     overlay.replaceChildren();
-    if(!$('showBall').checked || !track.length || !video.videoWidth)return;
-    const t=video.currentTime;
-    let lo=0, hi=track.length;
-    while(lo<hi){const mid=(lo+hi)>>1;if(track[mid].time<=t)lo=mid+1;else hi=mid;}
-    const last=track[lo-1];
-    if(!last||t-last.time>0.28)return;
-    let start=lo-1;
-    while(start>0 && t-track[start-1].time<0.75 && track[start].time-track[start-1].time<0.29)start--;
-    const width=video.videoWidth,height=video.videoHeight;
+    if(!video.videoWidth)return;
+    const t=video.currentTime,width=video.videoWidth,height=video.videoHeight;
     overlay.setAttribute('viewBox','0 0 '+width+' '+height);
+    function endIndex(list){
+      let lo=0,hi=list.length;
+      while(lo<hi){const mid=(lo+hi)>>1;if(list[mid].time<=t)lo=mid+1;else hi=mid;}
+      return lo;
+    }
+    const players=playerFrames[endIndex(playerFrames)-1];
+    if($('showPlayers').checked && players && t-players.time<0.16){
+      for(const p of players.bodies){
+        const mark=document.createElementNS(overlay.namespaceURI,'text');
+        mark.setAttribute('x',p.x*width);mark.setAttribute('y',p.y*height);
+        mark.setAttribute('font-size',width*0.016);mark.setAttribute('fill','#83dbff');
+        mark.setAttribute('style','paint-order:stroke;stroke:#142732;stroke-width:3px');
+        mark.textContent='P'+p.id;overlay.append(mark);
+      }
+    }
+    if(!$('showBall').checked)return;
+    const lo=endIndex(track),last=track[lo-1];
+    if(!last || t-last.time>0.075)return;
+    let start=lo-1;
+    while(start>0 && t-track[start-1].time<0.5 && track[start].segment===track[start-1].segment)start--;
     const trail=document.createElementNS(overlay.namespaceURI,'polyline');
     trail.setAttribute('points',track.slice(start,lo).map(p=>p.x*width+','+p.y*height).join(' '));
     trail.setAttribute('style','fill:none;stroke:#ffdc5d;stroke-width:3;vector-effect:non-scaling-stroke');
@@ -41,6 +54,11 @@
   video.addEventListener('timeupdate',paintBall);
   video.addEventListener('seeked',paintBall);
   $('showBall').onchange=paintBall;
+  $('showPlayers').onchange=paintBall;
+  if(video.requestVideoFrameCallback){
+    function next(){paintBall();video.requestVideoFrameCallback(next);}
+    video.requestVideoFrameCallback(next);
+  }
   function requestTrack(id,write){
     return new Promise((resolve,reject)=>{
       if(!db)return reject(Error('Device storage unavailable.'));
@@ -147,10 +165,11 @@
       drawQueue();
     },
     changeSource(id) {
-      scanMedia=id;track=[];coverage='';paintBall();$('ballReport').textContent='';
+      scanMedia=id;track=[];playerFrames=[];coverage='';paintBall();$('ballReport').textContent='';
       openDB.then(()=>requestTrack(id)).then(result=>{
         if(scanMedia!==id||!result)return;
-        track=result.points;coverage=result.coverage;$('ballReport').textContent=coverage;paintBall();
+        if(result.version!==2){$('ballReport').textContent='Analyze this video again to use volleyball detection.';return;}
+        track=result.points;playerFrames=result.players||[];coverage=result.coverage;$('ballReport').textContent=coverage;paintBall();
       }).catch(()=>{});
       generation++;
       scanning=false;
@@ -222,41 +241,61 @@
       const canvas=document.createElement('canvas');
       canvas.width=224; canvas.height=Math.max(48,Math.min(320,Math.round(224*decoder.videoHeight/decoder.videoWidth)));
       const ctx=canvas.getContext('2d',{willReadFrequently:true});
-      const step=0.125;
+      $('scanStatus').textContent='Loading volleyball detector…';
+      let detector;
+      try { detector=await RallyBall.create(); }
+      catch(err){throw Error('Could not load the volleyball detector. Check your connection and retry. '+err.message);}
+      const step=1/25;
+      const seenPlayers=[];
       const estimates=[];
       const observePlayers=PlayerIdentity.createTracker();
       const contactTracks=new Map();
       const samples=[];
       let previous=null;
-      for(let at=0;at<duration;at+=step) {
-        if(token!==generation) return;
-        if(at>0) await waitFor(decoder,'seeked',()=>{decoder.currentTime=at});
-        if(token!==generation) return;
-        ctx.drawImage(decoder,0,0,canvas.width,canvas.height);
-        const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-        if(previous){
-          const {motion,point}=BallTracking.observe(pixels,previous,canvas.width,canvas.height,at,estimates.at(-1));
-          samples.push({at,motion});
-          const person=observePlayers(pixels,previous,canvas.width,canvas.height,at,point);
-          if(point){estimates.push(point);if(person)contactTracks.set(at,person);}
+      for(let frame=0;frame*step<duration;frame++){
+        const at=frame*step;
+        if(token!==generation)return;
+        if(frame)await waitFor(decoder,'seeked',()=>{decoder.currentTime=at;});
+        if(token!==generation)return;
+        if(frame%3===0){
+          ctx.drawImage(decoder,0,0,canvas.width,canvas.height);
+          const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+          if(previous){
+            let changed=0;
+            for(let j=0;j<pixels.length;j+=4)if(Math.abs(pixels[j]-previous[j])+Math.abs(pixels[j+1]-previous[j+1])+Math.abs(pixels[j+2]-previous[j+2])>75)changed++;
+            samples.push({at,motion:changed/(pixels.length/4)});
+            observePlayers(pixels,previous,canvas.width,canvas.height,at,null);
+            seenPlayers.push({time:at,bodies:observePlayers.visible});
+          }
+          previous=pixels;
         }
-        previous=pixels;
-        $('scanStatus').textContent='Analyzing '+Math.floor(at/duration*100)+'%';
+        if(detector.capture(decoder,at))estimates.push(...await detector.flush());
+        $('scanStatus').textContent='Tracking volleyball · '+Math.floor(at/duration*100)+'%';
       }
-      if(token!==generation) return;
-      const regions=FilmAnalysis.segments(samples,step,duration);
-      const sequences=[];
-      for(const point of estimates){
-        const last=sequences.at(-1);
-        if(last && point.time-last.end<=0.26)last.end=point.time;
-        else sequences.push({start:point.time,end:point.time});
+      estimates.push(...await detector.flush());
+      if(token!==generation)return;
+      const regions=FilmAnalysis.segments(samples,step*3,duration);
+      const flights=[],validPoints=[];
+      let sequence=[],segment=0;
+      function finish(){
+        if(sequence.length>=3){
+          flights.push({start:sequence[0].time,end:sequence.at(-1).time});
+          for(const p of sequence){p.segment=segment;validPoints.push(p);}
+        }
+        segment++;sequence=[];
       }
-      const flights=sequences.filter(s=>s.end-s.start>=0.375);
-      const validPoints=[];
-      let flightIndex=0;
-      for(const point of estimates){
-        while(flightIndex<flights.length && flights[flightIndex].end<point.time)flightIndex++;
-        if(flights[flightIndex]?.start<=point.time)validPoints.push(point);
+      for(const p of estimates){
+        const prior=sequence.at(-1);
+        if(prior && (p.time-prior.time>0.081 || Math.hypot(p.x-prior.x,p.y-prior.y)>0.15))finish();
+        sequence.push(p);
+      }
+      finish();
+      let pi=0;
+      for(const p of validPoints){
+        while(pi+1<seenPlayers.length && seenPlayers[pi+1].time<=p.time)pi++;
+        const f=seenPlayers[pi];if(!f||p.time<f.time||p.time-f.time>0.13)continue;
+        const nearby=f.bodies.map(q=>({id:q.id,d:Math.hypot(q.x-p.x,(q.y-p.y-0.045)*0.8)})).sort((a,b)=>a.d-b.d);
+        if(nearby[0]?.d<0.13 && (!nearby[1]||nearby[1].d-nearby[0].d>0.035))contactTracks.set(p.time,nearby[0].id);
       }
       const combined=[...regions,...flights].sort((a,b)=>a.start-b.start);
       const merged=[];
@@ -286,12 +325,12 @@
       }
       keeper.saveIdentities();
       plays=plays.filter(p=>p.mediaId!==media.id || !p.suggested).concat(windows);
-      track=validPoints;
-      coverage='Estimated ball visible in '+(100*track.length/Math.max(1,samples.length)).toFixed(0)+'% of sampled frames at 8 samples/sec. Gaps indicate tracking loss.';
+      track=validPoints;playerFrames=seenPlayers;
+      coverage='Estimated ball visible in '+(100*track.length/Math.max(1,Math.ceil(duration/step))).toFixed(0)+'% of sampled frames at 25 samples/sec. Gaps indicate tracking loss.';
       $('ballReport').textContent=coverage;
       persist();render();paintBall();selectedWindow=null;drawQueue();
       $('scanStatus').textContent=windows.length+' suggested clips available in Clip library. Serve and pass suggestions use ball motion; review outcomes on each clip.';
-      try{await requestTrack(media.id,{id:media.id,points:track,coverage});}catch{toast('Ball path available for this session only.');}
+      try{await requestTrack(media.id,{id:media.id,version:2,points:track,players:playerFrames,coverage});}catch{toast('Ball path available for this session only.');}
     } catch(error) {
       if(token===generation) $('scanStatus').textContent=error.message;
     } finally {

@@ -18,11 +18,13 @@ async function run() {
   try {
     browser=await chromium.launch();
     const page=await browser.newPage({viewport:{width:390,height:844}});
+    page.on('pageerror',e=>console.log('Browser error',e.message));
+    page.on('requestfailed',req=>console.log('Request failed',req.url(),req.failure()?.errorText));
     await page.goto('http://127.0.0.1:'+server.address().port,{waitUntil:'domcontentloaded'});
     await page.locator('#upload').setInputFiles(process.argv[2]);
     await page.locator('#scan:enabled').click();
     const candidate=page.locator('#queue button').first();
-    await candidate.waitFor({timeout:45000});
+    try{await candidate.waitFor({timeout:90000});}catch(error){throw Error(await page.locator('#scanStatus').innerText()+' '+error.message);}
     await page.locator('[data-tab=clips]').click();
     const automatic=page.locator('#library .clip-card').first();
     await automatic.waitFor();
@@ -100,6 +102,27 @@ async function run() {
     const restored=await identityPage.evaluate(()=>plays.map(p=>[p.player,p.position]));
     assert.deepEqual(restored,[['Jordan','Setter'],['Jordan','Setter'],['Unassigned','Unassigned']]);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    if(process.argv[3]){
+      await page.locator('#upload').setInputFiles(process.argv[3]);
+      await page.locator('#scan:enabled').click();
+      await page.waitForFunction(()=>document.querySelector('#ballReport').textContent.includes('sampled frames'),{},{timeout:90000});
+      const saved=await page.evaluate(async()=>{
+        const db=await openDB;
+        return await new Promise(resolve=>{const req=db.transaction('tracks').objectStore('tracks').get(media.id);req.onsuccess=()=>resolve(req.result);});
+      });
+      assert.ok(saved.points.length>=6,'detect a sustained ball flight in indoor rally');
+      assert.ok(saved.players.some(f=>f.bodies.length),'player track overlay has observations');
+      const reference=(await fs.readFile(process.argv[4],'utf8')).trim().split(/\r?\n/).slice(1).map(row=>row.split(',').map(Number));
+      const [fps,w,h]=process.argv.slice(5).map(Number);
+      const compared=saved.points.flatMap(p=>{
+        const row=reference[Math.round(p.time*fps)];
+        if(!row || !row[1])return [];
+        return [Math.hypot(p.x-row[2]/w,p.y-row[3]/h)];
+      });
+      const close=compared.filter(d=>d<0.035).length;
+      console.log('Indoor rally: detections',saved.points.length,'overlap with reference predictions',compared.length,'within 0.035 normalized distance',close);
+      assert.ok(compared.length>=5 && close/compared.length>=0.75,'compare browser ball locations against published reference predictions');
+    }
     console.log('PASS: mobile layout, import, motion scan, event filters, retained video, trim playback, edit and clip export');
   } finally { await browser?.close(); server.closeAllConnections(); server.close(); }
 }
