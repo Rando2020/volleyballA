@@ -36,3 +36,10 @@ These metrics describe tagged clips, not necessarily a complete match. Other pos
 Load video and choose Analyze video. CourtSense samples up to about 1,800 small frames in a separate decoder and groups motion into candidate clips. This works best with fixed cameras. Camera movement, warmups, or a distant ball can produce extra or missed suggestions. Confirm Point, Error and Pass while reviewing each clip. These are overlapping labels. Point means a point for either team and does not identify the winner. Clips retain their selected event tags and optional 5–1 setter zone after saving. The clip library filters both. The scan queue is temporary.
 
 The contextual rule lookup retrieves short, locally authored summaries by keyword and links to the FIVB indoor 2025–2028 edition and a coaching resource. It does not run a generative model. The Hudl Explore interaction reference is https://www.hudl.com/support/hudl-volleyball/guides/explore.
+
+## Automatic clip review
+Analyze samples a video at eight frames per second, comparing moving compact bright regions and their continuity. The overlay reports estimated screen-space ball positions and sampled coverage. Lighting, uniforms, distant balls, cuts and camera motion affect accuracy. Direction changes and edge-originating flights are serve/pass cues, not confirmed calls. Other movement appears as Activity. Aces, serve errors, game boundaries and player names require review. The clip library includes suggestions immediately and excludes them from confirmed performance rates. Select up to five seconds independently before and after for playback and export.
+
+Games can have a pool/bracket stage, number, and YouTube link. Mark game starts on a multi-game video to assign clips by timestamp. A channel link is a bookmark. Import a local video for scanning. Use a clip's player selector to attribute a contact to the roster. Select a serve result or confirm an event directly on the clip card.
+
+Run node tracking-test.mjs alongside the existing logic and browser checks.

@@ -4,14 +4,74 @@
   let scanning = false;
   let windows = [];
   let selectedWindow = null;
+  let track=[];
+  let scanMedia=null;
+  let coverage='';
+  for(const id of ['lead','tail']){
+    $(id).innerHTML=Array.from({length:6},(_,i)=>'<option value="'+i+'">'+i+' seconds</option>').join('');
+    $(id).value=localStorage.getItem('courtsense-'+id)||'0';
+    $(id).onchange=()=>{localStorage.setItem('courtsense-'+id,$(id).value);if(selectedWindow)openCandidate(selectedWindow);};
+  }
+  const bounds=(p,duration)=>BallTracking.bounds(p,duration,$('lead').value,$('tail').value);
+  const overlay=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  overlay.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';
+  overlay.setAttribute('viewBox','0 0 1000 1000');
+  overlay.setAttribute('preserveAspectRatio','xMidYMid meet');
+  $('stage').append(overlay);
+  function paintBall(){
+    overlay.replaceChildren();
+    if(!$('showBall').checked || !track.length || !video.videoWidth)return;
+    const t=video.currentTime;
+    let lo=0, hi=track.length;
+    while(lo<hi){const mid=(lo+hi)>>1;if(track[mid].time<=t)lo=mid+1;else hi=mid;}
+    const last=track[lo-1];
+    if(!last||t-last.time>0.28)return;
+    let start=lo-1;
+    while(start>0 && t-track[start-1].time<0.75 && track[start].time-track[start-1].time<0.29)start--;
+    const width=video.videoWidth,height=video.videoHeight;
+    overlay.setAttribute('viewBox','0 0 '+width+' '+height);
+    const trail=document.createElementNS(overlay.namespaceURI,'polyline');
+    trail.setAttribute('points',track.slice(start,lo).map(p=>p.x*width+','+p.y*height).join(' '));
+    trail.setAttribute('style','fill:none;stroke:#ffdc5d;stroke-width:3;vector-effect:non-scaling-stroke');
+    const ring=document.createElementNS(overlay.namespaceURI,'circle');
+    ring.setAttribute('cx',last.x*width);ring.setAttribute('cy',last.y*height);ring.setAttribute('r',width*0.011);
+    ring.setAttribute('style','fill:none;stroke:#ffdc5d;stroke-width:2;vector-effect:non-scaling-stroke');
+    overlay.append(trail,ring);
+  }
+  video.addEventListener('timeupdate',paintBall);
+  video.addEventListener('seeked',paintBall);
+  $('showBall').onchange=paintBall;
+  function requestTrack(id,write){
+    return new Promise((resolve,reject)=>{
+      if(!db)return reject(Error('Device storage unavailable.'));
+      const tx=db.transaction('tracks',write?'readwrite':'readonly');
+      const records=tx.objectStore('tracks');
+      const req=write?records.put(write):records.get(id);
+      tx.oncomplete=()=>resolve(req.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+  }
+  function openCandidate(item){
+    tab('review');resetForm();
+    selectedWindow=item;editing=item.id;
+    $('player').value=item.player;$('position').value=item.position;roleFields();
+    $('save').textContent='Confirm play';$('cancel').hidden=false;
+    $('start').value=item.start;$('end').value=item.end;
+    checks.forEach(box=>box.checked=kinds(item).includes(box.value));
+    const [a,b]=bounds(item,video.duration);video.currentTime=a;clipEnd=b;play();
+    drawQueue();$('stage').scrollIntoView({block:'center'});
+  }
   const checks = [...document.querySelectorAll('#eventKinds input')];
   function kinds(play) {
-    if (play.events?.length) return play.events;
-    const labels = [];
+    const labels = [...(play.events||[])];
+    if(['Ace','Serve in play','Serve error'].includes(play.outcome))labels.push('Serve',play.outcome);
+    if(['Kill','Attack error','Dug by opponent'].includes(play.outcome))labels.push('Attack');
+    if(['Block point','Block touch'].includes(play.outcome))labels.push('Block');
+    if(['Controlled dig','Uncontrolled dig'].includes(play.outcome))labels.push('Dig');
+    if(play.action==='Set')labels.push('Set');
     if (['Kill','Ace','Block point','Blocked for point','Setter fault','Attack error','Serve error','Reception error'].includes(play.outcome)) labels.push('Point');
     if (['Setter fault','Attack error','Serve error','Reception error'].includes(play.outcome)) labels.push('Error');
     if (play.action === 'Serve receive' || ['In-system pass','Playable pass','Overpass','Reception error'].includes(play.outcome)) labels.push('Pass');
-    return labels;
+    return [...new Set(labels)];
   }
   function showRules(query) {
     const matches = FilmAnalysis.retrieve(query);
@@ -39,25 +99,31 @@
     $('queue').replaceChildren();
     for (const item of windows) {
       const button = document.createElement('button');
-      button.textContent = time(item.start)+' to '+time(item.end);
+      button.textContent = item.detected+' · '+time(item.start)+' to '+time(item.end);
       button.setAttribute('aria-pressed',String(item===selectedWindow));
-      button.onclick = () => {
-        tab('review');
-        resetForm();
-        selectedWindow = item;
-        $('start').value = item.start;
-        $('end').value = item.end;
-        video.currentTime = item.start;
-        clipEnd = item.end;
-        play();
-        drawQueue();
-        $('stage').scrollIntoView({block:'center'});
-      };
+      button.onclick=()=>openCandidate(item);
       $('queue').append(button);
     }
   }
   globalThis.reviewTools = {
-    kinds,
+    kinds,bounds,
+    groupedCards(list){
+      if(!list.length)return cards([]);
+      const groups=new Map();
+      for(const p of list){
+        const category=p.suggested?p.detected:(p.events?.[0]||kinds(p)[0]||p.action||'Other');
+        const title=(p.suggested?'Suggested ':'')+category;
+        if(!groups.has(title))groups.set(title,[]);
+        groups.get(title).push(p);
+      }
+      return [...groups].map(([title,items])=>'<h3 class="clip-group">'+esc(title)+' ('+items.length+')</h3>'+cards(items.sort((a,b)=>a.start-b.start))).join('');
+    },
+    serveControl(p){
+      if(p.sample)return '';
+      const other=['Point','Error','Pass','Set','Attack','Block','Dig'].map(v=>'<option>'+v+'</option>').join('');
+      const options=['','Ace','Serve in play','Serve error'].map(label=>'<option value="'+label+'" '+(p.outcome===label?'selected':'')+'>'+(label||'Classify serve…')+'</option>').join('');
+      return '<label>Confirm event<select data-kind="'+esc(p.id)+'"><option value="">Choose event…</option>'+other+'</select></label><label>Serve result<select data-serve="'+esc(p.id)+'">'+options+'</select></label>';
+    },
     tags: () => ({events:checks.filter(box=>box.checked).map(box=>box.value),setterZone:$('setterZone').value}),
     resetTags() {
       checks.forEach(box => box.checked=false);
@@ -80,7 +146,12 @@
       selectedWindow=null;
       drawQueue();
     },
-    changeSource() {
+    changeSource(id) {
+      scanMedia=id;track=[];coverage='';paintBall();$('ballReport').textContent='';
+      openDB.then(()=>requestTrack(id)).then(result=>{
+        if(scanMedia!==id||!result)return;
+        track=result.points;coverage=result.coverage;$('ballReport').textContent=coverage;paintBall();
+      }).catch(()=>{});
       generation++;
       scanning=false;
       windows=[];
@@ -91,6 +162,22 @@
       $('scanStatus').textContent='Loading video…';
     }
   };
+  document.addEventListener('change',e=>{
+    if(e.target.dataset.kind && e.target.value){
+      const p=plays.find(v=>v.id===e.target.dataset.kind);
+      if(!p)return;
+      const prior=p.suggested?[]:p.events||[];
+      p.events=[...new Set([...prior,e.target.value])];p.action=e.target.value;p.suggested=false;
+      persist();windows=windows.filter(v=>v.id!==p.id);drawQueue();render();return;
+    }
+    const id=e.target.dataset.serve;
+    if(!id || !e.target.value)return;
+    const p=plays.find(item=>item.id===id);if(!p)return;
+    p.outcome=e.target.value;p.action='Serve';p.suggested=false;
+    p.events=['Serve',p.outcome]; if(p.outcome!=='Serve in play')p.events.push('Point');
+    if(p.outcome==='Serve error')p.events.push('Error');
+    persist();windows=windows.filter(item=>item.id!==id);drawQueue();render();
+  });
   for (const id of ['eventFilter','zoneFilter']) $(id).onchange=render;
   video.addEventListener('loadedmetadata',() => {
     $('scan').disabled=!Number.isFinite(video.duration);
@@ -133,33 +220,65 @@
       const duration=decoder.duration;
       if (!Number.isFinite(duration) || duration<=0) throw Error('Video duration is unavailable.');
       const canvas=document.createElement('canvas');
-      canvas.width=96; canvas.height=54;
+      canvas.width=224; canvas.height=Math.max(48,Math.min(320,Math.round(224*decoder.videoHeight/decoder.videoWidth)));
       const ctx=canvas.getContext('2d',{willReadFrequently:true});
-      const step=Math.max(0.5,duration/1800);
+      const step=0.125;
+      const estimates=[];
       const samples=[];
       let previous=null;
       for(let at=0;at<duration;at+=step) {
         if(token!==generation) return;
         if(at>0) await waitFor(decoder,'seeked',()=>{decoder.currentTime=at});
         if(token!==generation) return;
-        ctx.drawImage(decoder,0,0,96,54);
-        const pixels=ctx.getImageData(0,0,96,54).data;
-        if(previous) {
-          let changed=0;
-          for(let i=0;i<pixels.length;i+=4) {
-            const delta=Math.abs(pixels[i]-previous[i])+Math.abs(pixels[i+1]-previous[i+1])+Math.abs(pixels[i+2]-previous[i+2]);
-            if(delta>90) changed++;
-          }
-          samples.push({at,motion:changed/(96*54)});
+        ctx.drawImage(decoder,0,0,canvas.width,canvas.height);
+        const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+        if(previous){
+          const {motion,point}=BallTracking.observe(pixels,previous,canvas.width,canvas.height,at,estimates.at(-1));
+          samples.push({at,motion});
+          if(point)estimates.push(point);
         }
         previous=pixels;
         $('scanStatus').textContent='Analyzing '+Math.floor(at/duration*100)+'%';
       }
       if(token!==generation) return;
-      windows=FilmAnalysis.segments(samples,step,duration);
-      selectedWindow=null;
-      drawQueue();
-      $('scanStatus').textContent=windows.length?windows.length+' suggested clips. Select one to play, adjust its bounds, and confirm events.':'No clear motion sequences found. You can still mark clips in Review studio.';
+      const regions=FilmAnalysis.segments(samples,step,duration);
+      const sequences=[];
+      for(const point of estimates){
+        const last=sequences.at(-1);
+        if(last && point.time-last.end<=0.26)last.end=point.time;
+        else sequences.push({start:point.time,end:point.time});
+      }
+      const flights=sequences.filter(s=>s.end-s.start>=0.375);
+      const validPoints=[];
+      let flightIndex=0;
+      for(const point of estimates){
+        while(flightIndex<flights.length && flights[flightIndex].end<point.time)flightIndex++;
+        if(flights[flightIndex]?.start<=point.time)validPoints.push(point);
+      }
+      const combined=[...regions,...flights].sort((a,b)=>a.start-b.start);
+      const merged=[];
+      for(const region of combined){
+        const last=merged.at(-1);
+        if(last && region.start<last.end && region.end-last.start<=25)last.end=Math.max(last.end,region.end);
+        else if(!last || region.end>last.end)merged.push({start:Math.max(region.start,last?.end||0),end:region.end});
+      }
+      const detected=BallTracking.extract(validPoints,merged);
+      const confirmed=plays.filter(p=>p.mediaId===media.id && p.scanKey && !p.suggested);
+      const previousByKey=new Map(plays.filter(p=>p.mediaId===media.id && p.suggested).map(p=>[p.scanKey,p]));
+      windows=detected.map(event=>{
+        const scanKey=event.type+'@'+event.at.toFixed(2);
+        const prior=previousByKey.get(scanKey);
+        return {id:prior?.id||uid(),mediaId:media.id,mediaName:media.name,player:prior?.player||'Unassigned',position:prior?.position||'Unassigned',rosterId:prior?.rosterId||'',
+          gameId:globalThis.keeper?.gameAt(media.id,event.at)||'',eventTime:event.at,start:event.start,end:event.end,detected:event.type,scanKey,suggested:true,action:event.type,
+          events:[event.type],outcome:'Unknown',quality:'Unknown',notes:'',points:[]};
+      }).filter(p=>!confirmed.some(old=>old.scanKey===p.scanKey));
+      plays=plays.filter(p=>p.mediaId!==media.id || !p.suggested).concat(windows);
+      track=validPoints;
+      coverage='Estimated ball visible in '+(100*track.length/Math.max(1,samples.length)).toFixed(0)+'% of sampled frames at 8 samples/sec. Gaps indicate tracking loss.';
+      $('ballReport').textContent=coverage;
+      persist();render();paintBall();selectedWindow=null;drawQueue();
+      $('scanStatus').textContent=windows.length+' suggested clips available in Clip library. Serve and pass suggestions use ball motion; review outcomes on each clip.';
+      try{await requestTrack(media.id,{id:media.id,points:track,coverage});}catch{toast('Ball path available for this session only.');}
     } catch(error) {
       if(token===generation) $('scanStatus').textContent=error.message;
     } finally {
