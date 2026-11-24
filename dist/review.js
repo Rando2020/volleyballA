@@ -224,6 +224,8 @@
       const ctx=canvas.getContext('2d',{willReadFrequently:true});
       const step=0.125;
       const estimates=[];
+      const observePlayers=PlayerIdentity.createTracker();
+      const contactTracks=new Map();
       const samples=[];
       let previous=null;
       for(let at=0;at<duration;at+=step) {
@@ -235,7 +237,8 @@
         if(previous){
           const {motion,point}=BallTracking.observe(pixels,previous,canvas.width,canvas.height,at,estimates.at(-1));
           samples.push({at,motion});
-          if(point)estimates.push(point);
+          const person=observePlayers(pixels,previous,canvas.width,canvas.height,at,point);
+          if(point){estimates.push(point);if(person)contactTracks.set(at,person);}
         }
         previous=pixels;
         $('scanStatus').textContent='Analyzing '+Math.floor(at/duration*100)+'%';
@@ -272,6 +275,16 @@
           gameId:globalThis.keeper?.gameAt(media.id,event.at)||'',eventTime:event.at,start:event.start,end:event.end,detected:event.type,scanKey,suggested:true,action:event.type,
           events:[event.type],outcome:'Unknown',quality:'Unknown',notes:'',points:[]};
       }).filter(p=>!confirmed.some(old=>old.scanKey===p.scanKey));
+      for(const clip of windows){
+        const prior=previousByKey.get(clip.scanKey);
+        if(prior?.identityOverride)clip.identityOverride=true;
+        if(prior?.unknownId)keeper.attach(clip,prior.unknownId);
+        else if(!prior?.rosterId && !prior?.identityOverride && clip.detected!=='Activity'){
+          const trackId=contactTracks.get(clip.eventTime);
+          if(trackId)keeper.attachTrack(clip,trackId);
+        }
+      }
+      keeper.saveIdentities();
       plays=plays.filter(p=>p.mediaId!==media.id || !p.suggested).concat(windows);
       track=validPoints;
       coverage='Estimated ball visible in '+(100*track.length/Math.max(1,samples.length)).toFixed(0)+'% of sampled frames at 8 samples/sec. Gaps indicate tracking loss.';

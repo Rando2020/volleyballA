@@ -81,6 +81,24 @@ async function run() {
     const totals=page.locator('#keeperStats tbody tr').first();
     assert.equal(await totals.locator('th').innerText(),'Test setter');
     assert.equal(await totals.locator('td').nth(1).innerText(),'1');
+    // Exercise grouping with controlled clip identities, independent of visual detection.
+    const identityPage=await browser.newPage();
+    await identityPage.goto(page.url(),{waitUntil:'domcontentloaded'});
+    await identityPage.evaluate(()=>{
+      plays=[0,1,2].map(i=>({id:'fixture'+i,mediaId:'fixture-film',player:'Unassigned',position:'Unassigned',events:['Set'],action:'Set',outcome:'Unknown',quality:'Unknown',start:i*5,end:i*5+2,points:[]}));
+      persist();render();
+    });
+    await identityPage.locator('[data-tab=clips]').click();
+    const library=identityPage.locator('#library');
+    await library.locator('[data-group="fixture0"]').selectOption('create');
+    await library.locator('[data-group="fixture1"]').selectOption({label:'Unknown 1'});
+    await library.getByText(/Possible setter from repeated/).first().waitFor();
+    await library.locator('[data-group-role]').first().selectOption('Setter');
+    identityPage.once('dialog',dialog=>dialog.accept('Jordan'));
+    await library.locator('[data-person="fixture0"]').selectOption('new');
+    await identityPage.reload({waitUntil:'domcontentloaded'});
+    const restored=await identityPage.evaluate(()=>plays.map(p=>[p.player,p.position]));
+    assert.deepEqual(restored,[['Jordan','Setter'],['Jordan','Setter'],['Unassigned','Unassigned']]);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     console.log('PASS: mobile layout, import, motion scan, event filters, retained video, trim playback, edit and clip export');
   } finally { await browser?.close(); server.closeAllConnections(); server.close(); }

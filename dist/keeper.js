@@ -3,7 +3,28 @@
   let book;
   try { book=JSON.parse(localStorage.getItem('courtsense-book')); } catch {}
   book ||= {games:[],roster:[],marks:{},channel:''};
+  book.unknowns ||= [];
   let sourceId=null;
+  const findUnknown=id=>book.unknowns.find(u=>u.id===id);
+  function createUnknown(mediaId,trackId=null){
+    const u={id:uid(),mediaId,trackId,label:'Unknown '+(book.unknowns.length+1),role:'Unassigned',personId:''};
+    book.unknowns.push(u);return u;
+  }
+  function attach(p,id){
+    const u=findUnknown(id);
+    if(!u || u.mediaId!==p.mediaId)return;
+    const person=book.roster.find(v=>v.id===u.personId);
+    p.unknownId=u.id;p.player=person?.name||u.label;p.rosterId=person?.id||'';
+    p.position=u.role!=='Unassigned'?u.role:(person?.role||'Unassigned');
+  }
+  function attachTrack(p,trackId){
+    const u=book.unknowns.find(u=>u.mediaId===p.mediaId && u.trackId===trackId)||createUnknown(p.mediaId,trackId);
+    attach(p,u.id);
+  }
+  function refreshGroup(u){
+    for(const clip of plays)if(clip.unknownId===u.id)attach(clip,u.id);
+    storeBook();persist();drawBook();render();
+  }
   function storeBook(){
     try {localStorage.setItem('courtsense-book',JSON.stringify(book));}
     catch {toast('Device storage is full. Keep this tab open.');}
@@ -68,9 +89,27 @@
   function card(p){
     if(p.sample)return '';
     const game=book.games.find(g=>g.id===p.gameId);
-    return (game?'<p>'+esc(gameLabel(game))+'</p>':'')+'<label>Who made this contact?<select data-person="'+esc(p.id)+'">'+options(book.roster.map(v=>[v.id,v.name]),p.rosterId,'Choose player')+'<option value="new">Add a player…</option></select></label>';
+    const u=findUnknown(p.unknownId);
+    const contacts=u?plays.filter(v=>v.unknownId===u.id):[];
+    const groups=book.unknowns.filter(v=>v.mediaId===p.mediaId);
+    const selector='<label>Who made this contact?<select data-person="'+esc(p.id)+'">'+options(book.roster.map(v=>[v.id,v.name]),p.rosterId,'Choose player')+'<option value="new">Add a player…</option></select></label>';
+    const move='<label>Group this contact<select data-group="'+esc(p.id)+'">'+options(groups.map(v=>[v.id,v.label]),p.unknownId,'No group')+'<option value="create">New unknown player</option></select></label>';
+    const roles=Array.from($('position').options).map(v=>[v.value,v.text]);
+    const role=u?'<p>'+esc(u.label)+' · '+contacts.length+' linked clips · '+esc(u.role==='Unassigned'?PlayerIdentity.roleHint(contacts):u.role)+'</p><label>Playing role for this group<select data-group-role="'+esc(u.id)+'">'+options(roles.filter(([v])=>v!=='Unassigned'),u.role,'Role unknown')+'</select></label><p class="hint">Choosing a name updates all '+contacts.length+' linked clips. Change the group first to correct one contact.</p>':'';
+    return (game?'<p>'+esc(gameLabel(game))+'</p>':'')+move+role+selector;
   }
   document.addEventListener('change',e=>{
+    const groupRole=e.target.dataset.groupRole;
+    if(groupRole){const u=findUnknown(groupRole);if(u){u.role=e.target.value||'Unassigned';refreshGroup(u);}return;}
+    const groupClip=e.target.dataset.group;
+    if(groupClip){
+      const p=plays.find(v=>v.id===groupClip);if(!p)return;
+      const id=e.target.value==='create'?createUnknown(p.mediaId).id:e.target.value;
+      p.identityOverride=true;
+      if(id)attach(p,id);
+      else {delete p.unknownId;p.rosterId='';p.player='Unassigned';p.position='Unassigned';}
+      storeBook();persist();render();return;
+    }
     const id=e.target.dataset.person;
     if(!id)return;
     const p=plays.find(v=>v.id===id);
@@ -82,6 +121,9 @@
       person=book.roster.find(v=>v.name.toLowerCase()===name.toLowerCase());
       if(!person){person={id:uid(),name,role:'Unassigned'};book.roster.push(person);storeBook();drawBook();}
     }
+    const u=findUnknown(p.unknownId);
+    if(u){u.personId=person?.id||'';refreshGroup(u);return;}
+    p.identityOverride=true;
     p.rosterId=person?.id||'';p.player=person?.name||'Unassigned';p.position=person?.role||'Unassigned';
     persist();render();
   });
@@ -96,6 +138,6 @@
     }
     $('keeperStats').innerHTML=rows.size?'<table><thead><tr><th>Player</th><th>Clips</th><th>Aces</th><th>Serves in play</th><th>Serve errors</th><th>Pass clips</th></tr></thead><tbody>'+[...rows].map(([name,r])=>'<tr><th>'+esc(name)+'</th>'+Object.values(r).map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<p>Confirm a contact and assign a player to see individual totals.</p>';
   }
-  globalThis.keeper={exportBook:()=>book,gameAt,card,stats,statsMatch,source(id){sourceId=id;drawBook();},matches:p=>!$('libraryGame').value||p.gameId===$('libraryGame').value};
+  globalThis.keeper={attach,attachTrack,saveIdentities:storeBook,exportBook:()=>book,gameAt,card,stats,statsMatch,source(id){sourceId=id;drawBook();},matches:p=>!$('libraryGame').value||p.gameId===$('libraryGame').value};
   drawBook();render();
 })();
