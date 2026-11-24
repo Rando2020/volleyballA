@@ -22,7 +22,11 @@ async function run() {
     page.on('requestfailed',req=>console.log('Request failed',req.url(),req.failure()?.errorText));
     await page.goto('http://127.0.0.1:'+server.address().port,{waitUntil:'domcontentloaded'});
     await page.locator('#upload').setInputFiles(process.argv[2]);
-    await page.locator('#scan:enabled').click();
+    await page.locator('#quickScan:enabled').click();
+    await page.waitForFunction(()=>document.querySelector('#scanStatus').textContent.includes('No qualifying volleyball play'),{},{timeout:90000});
+    assert.equal(await page.locator('#queue button').count(),0,'moving test pattern without ball creates no plays');
+    await page.locator('#upload').setInputFiles(process.argv[3]);
+    await page.locator('#quickScan:enabled').click();
     const candidate=page.locator('#queue button').first();
     try{await candidate.waitFor({timeout:90000});}catch(error){throw Error(await page.locator('#scanStatus').innerText()+' '+error.message);}
     await page.locator('[data-tab=clips]').click();
@@ -104,18 +108,10 @@ async function run() {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     if(process.argv[3]){
       await page.locator('#upload').setInputFiles(process.argv[3]);
-      await page.locator('#quickScan:enabled').click();
-      await page.waitForFunction(()=>document.querySelector('#scanStatus').textContent.includes('activity clips ·'));
-      console.log('Indoor quick scan:',await page.locator('#scanStatus').innerText());
-      const quickId=await page.evaluate(()=>media.id);
-      const quickCount=await page.locator('#queue button').count();
-      assert.ok(quickCount>0);
-      await page.locator('#upload').setInputFiles(process.argv[3]);
-      await page.waitForFunction(()=>document.querySelector('#scanStatus').textContent.includes('Saved results restored'));
-      assert.equal(await page.evaluate(()=>media.id),quickId);
-      assert.equal(await page.locator('#queue button').count(),quickCount);
-      await page.locator('#scan:enabled').click();
       await page.waitForFunction(()=>document.querySelector('#ballReport').textContent.includes('sampled frames'),{},{timeout:90000});
+      await page.locator('#quickScan:enabled').click();
+      assert.equal(await page.evaluate(()=>plays.some(p=>p.detected==='Activity')),false);
+      console.log('Volleyball events:',await page.evaluate(()=>plays.filter(p=>p.detected).map(p=>[p.detected,p.eventTime])));
       const saved=await page.evaluate(async()=>{
         const db=await openDB;
         return await new Promise(resolve=>{const req=db.transaction('tracks').objectStore('tracks').get(media.id);req.onsuccess=()=>resolve(req.result);});

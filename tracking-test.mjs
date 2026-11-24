@@ -32,3 +32,11 @@ for(let i=1;i<8;i++){
 assert.ok(linked.length>=2 && linked.at(-1)===linked.at(-2),'maintain a short moving-shirt track');
 assert.equal(follow(prev,prev,120,80,2,{x:.9,y:.7}),null);
 console.log('PASS: provisional clothing continuity and absent contact');
+
+const warmupWindow=[{start:0,end:5}];
+assert.equal(tracker.extract([],warmupWindow).length,0,'body motion alone never yields a clip');
+const carried=Array.from({length:30},(_,i)=>({time:i/25,x:0.4+i*0.002,y:0.55,segment:1}));
+assert.equal(tracker.extract(carried,warmupWindow).length,0,'slowly carried ball');
+const flight=carried.map((point,i)=>({...point,x:0.4+i*0.012}));
+assert.equal(tracker.extract(flight,warmupWindow)[0].type,'Unclassified play');
+console.log('PASS: no-ball and carried-ball controls, classify-later flight');
