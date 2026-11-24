@@ -59,5 +59,5 @@ const RallyBall = (() => {
       }
     };
   }
-  return {create};
+  return {create,decode};
 })();
