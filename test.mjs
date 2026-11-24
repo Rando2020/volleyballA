@@ -1,0 +1,23 @@
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+const elements=new Map(),storage=new Map();
+function el(id){if(!elements.has(id))elements.set(id,{id,value:'',innerHTML:'',textContent:'',style:{},hidden:false,checked:false,parentElement:{},classList:{toggle(){},remove(){}},addEventListener(){},pause(){},play:async()=>{},currentTime:0,duration:20});return elements.get(id)}
+el('position').value='Setter';
+const c=vm.createContext({document:{getElementById:el,querySelectorAll:()=>[],querySelector:()=>el('upload2'),body:{addEventListener(){}},createElement:()=>el('new')},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},indexedDB:{open:()=>({})},crypto:{randomUUID:()=>Math.random().toString()},URL:{createObjectURL:()=>'',revokeObjectURL(){}},setTimeout:()=>0,clearTimeout(){},console,Blob,window:{scrollTo(){}}});
+vm.runInContext(readFileSync('dist/app.js','utf8'),c);
+const run=s=>vm.runInContext(s,c);
+run("$('demo').onclick()");
+assert.match(el('metrics').innerHTML,/40%/);
+assert.match(el('metrics').innerHTML,/75%/);
+assert.equal(run('plays.length'),12);
+assert.equal(storage.size,0,'Demo must never persist as user data');
+run("$('demo').onclick()");assert.equal(run('plays.length'),0);
+assert.throws(()=>run('range()'),/Import/);
+run("media={id:'test',name:'test.webm'}; $('start').value='8'; $('end').value='3'");assert.throws(()=>run('range()'),/start/);
+run("$('start').value='0'; $('end').value='5'; $('player').value='Tester'; $('quality').value='In rhythm'; $('outcome').value='Kill'; $('tagForm').onsubmit({preventDefault(){}})");
+assert.equal(run('plays.length'),1);assert.equal(JSON.parse(storage.get('courtsense-v1')).length,1);
+run("editing=plays[0].id; $('outcome').value='Dug by opponent'; $('tagForm').onsubmit({preventDefault(){}})");assert.equal(run('plays.length'),1);assert.equal(run('plays[0].outcome'),'Dug by opponent');
+run("plays[0].quality='Unknown'; plays[0].outcome='Unknown'; render()");assert.match(el('metrics').innerHTML,/0 known attacks/);assert.match(el('metrics').innerHTML,/0 graded sets/);
+assert.equal(run("esc('<img onerror=alert(1)>')"),'&lt;img onerror=alert(1)&gt;');
+console.log('PASS: sample isolation, denominators, invalid trims, save, edit, persistence, output escaping.');
