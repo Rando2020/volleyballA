@@ -30,3 +30,9 @@ Kill rate off sets = kills / setter plays with known attack outcomes (kill, dug,
 Hittable sets = in rhythm + hittable with adjustment / setter plays with known quality.
 
 These metrics describe tagged clips, not necessarily a complete match. Other positions support contact/action tags and outcome counts; their advanced metrics are not yet implemented.
+
+## Video analysis and rule references
+
+Load video and choose Analyze video. CourtSense samples up to about 1,800 small frames in a separate decoder and groups motion into candidate clips. This works best with fixed cameras. Camera movement, warmups, or a distant ball can produce extra or missed suggestions. Confirm Point, Error and Pass while reviewing each clip. These are overlapping labels. Point means a point for either team and does not identify the winner. Clips retain their selected event tags and optional 5–1 setter zone after saving. The clip library filters both. The scan queue is temporary.
+
+The contextual rule lookup retrieves short, locally authored summaries by keyword and links to the FIVB indoor 2025–2028 edition and a coaching resource. It does not run a generative model. The Hudl Explore interaction reference is https://www.hudl.com/support/hudl-volleyball/guides/explore.
