@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   review:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -13,6 +13,6 @@ jobs:
           node-version: 22
       - run: node --check dist/app.js && node --check dist/review.js && node test.mjs
       - run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
-      - run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
       - run: ffmpeg -v error -f lavfi -i testsrc2=size=320x180:rate=15:duration=4 -c:v libvpx -b:v 250k /tmp/test.webm
       - run: node browser-test.cjs /tmp/test.webm
