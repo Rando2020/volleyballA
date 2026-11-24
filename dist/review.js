@@ -2,6 +2,11 @@
 (() => {
   let generation = 0;
   let scanning = false;
+  let quickJob=null;
+  let restoredDetail=false;
+  const quickKey=id=>'courtsense-rally-v1/'+id;
+  const now=()=>performance.now();
+  const seconds=ms=>(ms/1000).toFixed(1)+' s';
   let windows = [];
   let selectedWindow = null;
   let track=[], playerFrames=[];
@@ -165,10 +170,16 @@
       drawQueue();
     },
     changeSource(id) {
+      quickJob=null;restoredDetail=false;
+      $('quickScan').disabled=true;$('quickScan').textContent='Find rally clips';
       scanMedia=id;track=[];playerFrames=[];coverage='';paintBall();$('ballReport').textContent='';
       openDB.then(()=>requestTrack(id)).then(result=>{
         if(scanMedia!==id||!result)return;
         if(result.version!==2){$('ballReport').textContent='Analyze this video again to use volleyball detection.';return;}
+        restoredDetail=true;
+        windows=plays.filter(p=>p.mediaId===id && p.suggested);
+        drawQueue();
+        if(!scanning && !quickJob)$('scanStatus').textContent='Detailed results restored from this device.';
         track=result.points;playerFrames=result.players||[];coverage=result.coverage;$('ballReport').textContent=coverage;paintBall();
       }).catch(()=>{});
       generation++;
@@ -177,7 +188,7 @@
       selectedWindow=null;
       drawQueue();
       $('scan').disabled=true;
-      $('scan').textContent='Analyze video';
+      $('scan').textContent='Track ball & players';
       $('scanStatus').textContent='Loading video…';
     }
   };
@@ -200,6 +211,12 @@
   for (const id of ['eventFilter','zoneFilter']) $(id).onchange=render;
   video.addEventListener('loadedmetadata',() => {
     $('scan').disabled=!Number.isFinite(video.duration);
+    $('quickScan').disabled=$('scan').disabled;
+    windows=plays.filter(p=>p.mediaId===media.id && p.suggested);
+    drawQueue();
+    if(restoredDetail || localStorage.getItem(quickKey(media.id))==='done'){
+      $('scanStatus').textContent='Saved results restored. Select a clip to review.';return;
+    }
     $('scanStatus').textContent=$('scan').disabled?'A finite-duration video is required.':'Ready to analyze '+media.name+'.';
   });
   function waitFor(element,event,action) {
@@ -218,15 +235,69 @@
       try { action(); } catch(error) { finish(error); }
     });
   }
+  $('quickScan').onclick=async()=>{
+    if(quickJob){generation++;quickJob=null;$('scan').disabled=false;$('quickScan').textContent='Find rally clips';$('scanStatus').textContent='Stopped. Completed clips are in the library.';return;}
+    if(!media || sample || scanning)return;
+    const id=media.id;
+    if(restoredDetail || localStorage.getItem(quickKey(id))==='done'){
+      windows=plays.filter(p=>p.mediaId===id && p.suggested);drawQueue();tab('clips');
+      $('scanStatus').textContent='Showing previously analyzed clips. No rescan needed.';return;
+    }
+    const token=++generation;
+    quickJob=token;$('scan').disabled=true;$('quickScan').textContent='Stop rally scan';
+    const decoder=document.createElement('video');decoder.preload='auto';decoder.muted=true;
+    const started=now();let first=null;
+    try{
+      await waitFor(decoder,'loadeddata',()=>{decoder.src=media.url;});
+      const duration=decoder.duration,step=0.5;
+      const canvas=document.createElement('canvas');canvas.width=96;canvas.height=54;
+      const ctx=canvas.getContext('2d',{willReadFrequently:true});
+      const existing=new Set(plays.filter(p=>p.mediaId===id).map(p=>p.scanKey));
+      let previous=null,active=null,total=0;
+      function publish(){
+        if(!active)return;
+        const key='quick@'+active.start.toFixed(2);
+        if(!existing.has(key)){
+          const clip={...active,id:uid(),mediaId:id,mediaName:media.name,player:'Unassigned',position:'Unassigned',detected:'Activity',action:'Activity',outcome:'Unknown',quality:'Unknown',events:['Activity'],points:[],notes:'',scanKey:key,suggested:true,gameId:keeper.gameAt(id,active.start),eventTime:active.start};
+          existing.add(key);plays.push(clip);windows.push(clip);persist();render();drawQueue();
+        }
+        total++;first??=now()-started;active=null;
+      }
+      for(let at=0;at<duration;at+=step){
+        if(token!==generation)return;
+        if(at)await waitFor(decoder,'seeked',()=>{decoder.currentTime=at;});
+        if(token!==generation)return;
+        ctx.drawImage(decoder,0,0,96,54);
+        const pixels=ctx.getImageData(0,0,96,54).data;
+        if(previous){
+          let moving=0;
+          for(let i=0;i<pixels.length;i+=4)if(Math.abs(pixels[i]-previous[i])+Math.abs(pixels[i+1]-previous[i+1])+Math.abs(pixels[i+2]-previous[i+2])>90)moving++;
+          if(active && (at>active.end+0.5 || at-active.start>=15))publish();
+          if(moving/(96*54)>0.012){
+            active??={start:Math.max(0,at-step),end:at};
+            active.end=Math.min(duration,at+1);
+          }
+        }
+        previous=pixels;
+        $('scanStatus').textContent='Finding rallies · '+time(at)+' / '+time(duration)+' · '+total+' clips ready';
+      }
+      if(token!==generation)return;
+      publish();localStorage.setItem(quickKey(id),'done');
+      $('scanStatus').textContent=total+' activity clips · '+seconds(now()-started)+(first===null?'':' · first clip in '+seconds(first));
+    }catch(error){if(token===generation)$('scanStatus').textContent=error.message;}
+    finally{decoder.removeAttribute('src');decoder.load();if(quickJob===token){quickJob=null;$('scan').disabled=false;$('quickScan').textContent='Find rally clips';}}
+  };
   $('scan').onclick=async () => {
     if(scanning) {
       generation++;
-      scanning=false;
-      $('scan').textContent='Analyze video';
+      scanning=false;$('quickScan').disabled=false;
+      $('scan').textContent='Track ball & players';
       $('scanStatus').textContent='Scan canceled.';
       return;
     }
-    if(!media || sample) return toast('Load your match footage to analyze it.');
+    if(!media || sample || quickJob) return toast('Load your match footage to analyze it.');
+    const started=now();let inferenceMs=0,seekMs=0;
+    $('quickScan').disabled=true;
     const token=++generation;
     const decoder=document.createElement('video');
     decoder.muted=true;
@@ -255,7 +326,7 @@
       for(let frame=0;frame*step<duration;frame++){
         const at=frame*step;
         if(token!==generation)return;
-        if(frame)await waitFor(decoder,'seeked',()=>{decoder.currentTime=at;});
+        if(frame){const began=now();await waitFor(decoder,'seeked',()=>{decoder.currentTime=at;});seekMs+=now()-began;}
         if(token!==generation)return;
         if(frame%3===0){
           ctx.drawImage(decoder,0,0,canvas.width,canvas.height);
@@ -269,8 +340,8 @@
           }
           previous=pixels;
         }
-        if(detector.capture(decoder,at))estimates.push(...await detector.flush());
-        $('scanStatus').textContent='Tracking volleyball · '+Math.floor(at/duration*100)+'%';
+        if(detector.capture(decoder,at)){const began=now();estimates.push(...await detector.flush());inferenceMs+=now()-began;}
+        $('scanStatus').textContent='Tracking volleyball · '+Math.floor(at/duration*100)+'%'+(at>2?' · about '+time((now()-started)/1000*(duration-at)/at)+' remaining':'');
       }
       estimates.push(...await detector.flush());
       if(token!==generation)return;
@@ -324,9 +395,10 @@
         }
       }
       keeper.saveIdentities();
-      plays=plays.filter(p=>p.mediaId!==media.id || !p.suggested).concat(windows);
-      track=validPoints;playerFrames=seenPlayers;
-      coverage='Estimated ball visible in '+(100*track.length/Math.max(1,Math.ceil(duration/step))).toFixed(0)+'% of sampled frames at 25 samples/sec. Gaps indicate tracking loss.';
+      plays=plays.filter(p=>p.mediaId!==media.id || !p.suggested ||
+        (p.scanKey?.startsWith('quick@') && (p.rosterId || p.identityOverride))).concat(windows);
+      restoredDetail=true;track=validPoints;playerFrames=seenPlayers;
+      coverage='Estimated ball visible in '+(100*track.length/Math.max(1,Math.ceil(duration/step))).toFixed(0)+'% of sampled frames at 25 samples/sec. Gaps indicate tracking loss. Scan '+seconds(now()-started)+' · seeking '+seconds(seekMs)+' · model inference '+seconds(inferenceMs)+'.';
       $('ballReport').textContent=coverage;
       persist();render();paintBall();selectedWindow=null;drawQueue();
       $('scanStatus').textContent=windows.length+' suggested clips available in Clip library. Serve and pass suggestions use ball motion; review outcomes on each clip.';
@@ -337,8 +409,8 @@
       decoder.removeAttribute('src');
       decoder.load();
       if(token===generation) {
-        scanning=false;
-        $('scan').textContent='Analyze video';
+        scanning=false;$('quickScan').disabled=false;
+        $('scan').textContent='Track ball & players';
       }
     }
   };

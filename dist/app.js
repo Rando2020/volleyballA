@@ -19,7 +19,18 @@ const openDB=new Promise(resolve=>{const req=indexedDB.open('courtsense-media',2
 function storeMedia(m){return new Promise((resolve,reject)=>{if(!db)return reject(Error('Storage unavailable'));const tx=db.transaction('videos','readwrite');tx.objectStore('videos').put(m);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)})}
 function getMedia(id){return new Promise(resolve=>{if(!db)return resolve(null);const r=db.transaction('videos').objectStore('videos').get(id);r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)})}
 function setMedia(m){globalThis.reviewTools?.changeSource(m.id);globalThis.keeper?.source(m.id);if(media?.url)URL.revokeObjectURL(media.url);media={...m,url:URL.createObjectURL(m.blob)};video.src=media.url;$('empty').hidden=true;$('videoTitle').textContent=m.name;$('sourceBadge').textContent='YOUR FOOTAGE';clipEnd=null}
-async function upload(file){if(!file)return;if(sample){sample=false;plays=realPlays();$('demo').textContent='Explore sample data'}await openDB;const m={id:uid(),name:file.name,blob:file};setMedia(m);resetForm();try{await storeMedia(m);toast('Video imported and saved on this device. Find your first play.')}catch{toast('Video is ready for this session. Device storage was unavailable; keep your original file.')}render()}
+let importSequence=0;
+async function recordingId(file){
+  // Bounded reads also work for multi-gigabyte match recordings.
+  const length=65536;
+  const offsets=[0,Math.floor(file.size/2),Math.max(0,file.size-length)];
+  const parts=await Promise.all(offsets.map(offset=>file.slice(offset,offset+length).arrayBuffer()));
+  const sample=await new Blob([file.size.toString(),...parts]).arrayBuffer();
+  const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',sample));
+  return 'film-'+Array.from(digest,v=>v.toString(16).padStart(2,'0')).join('');
+}
+async function upload(file){if(!file)return;if(sample){sample=false;plays=realPlays();$('demo').textContent='Explore sample data'}const request=++importSequence;await openDB;const id=await recordingId(file);if(request!==importSequence)return;
+const m={id,name:file.name,blob:file};setMedia(m);resetForm();try{await storeMedia(m);toast('Video imported and saved on this device. Find your first play.')}catch{toast('Video is ready for this session. Device storage was unavailable; keep your original file.')}render()}
 $('upload').onchange=e=>{upload(e.target.files[0]);e.target.value=''};document.querySelector('.secondary-upload').onchange=e=>{upload(e.target.files[0]);e.target.value=''};
 video.onloadedmetadata=()=>{$('start').value=0;$('end').value=Math.min(5,video.duration).toFixed(1)};
 video.onerror=()=>toast('This video format could not be played. Try an H.264 MP4 or a browser-compatible WebM.');

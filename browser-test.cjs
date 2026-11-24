@@ -104,12 +104,23 @@ async function run() {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     if(process.argv[3]){
       await page.locator('#upload').setInputFiles(process.argv[3]);
+      await page.locator('#quickScan:enabled').click();
+      await page.waitForFunction(()=>document.querySelector('#scanStatus').textContent.includes('activity clips ·'));
+      console.log('Indoor quick scan:',await page.locator('#scanStatus').innerText());
+      const quickId=await page.evaluate(()=>media.id);
+      const quickCount=await page.locator('#queue button').count();
+      assert.ok(quickCount>0);
+      await page.locator('#upload').setInputFiles(process.argv[3]);
+      await page.waitForFunction(()=>document.querySelector('#scanStatus').textContent.includes('Saved results restored'));
+      assert.equal(await page.evaluate(()=>media.id),quickId);
+      assert.equal(await page.locator('#queue button').count(),quickCount);
       await page.locator('#scan:enabled').click();
       await page.waitForFunction(()=>document.querySelector('#ballReport').textContent.includes('sampled frames'),{},{timeout:90000});
       const saved=await page.evaluate(async()=>{
         const db=await openDB;
         return await new Promise(resolve=>{const req=db.transaction('tracks').objectStore('tracks').get(media.id);req.onsuccess=()=>resolve(req.result);});
       });
+      console.log('Indoor detailed scan:',saved.coverage);
       assert.ok(saved.points.length>=6,'detect a sustained ball flight in indoor rally');
       assert.ok(saved.players.some(f=>f.bodies.length),'player track overlay has observations');
       const reference=(await fs.readFile(process.argv[4],'utf8')).trim().split(/\r?\n/).slice(1).map(row=>row.split(',').map(Number));
