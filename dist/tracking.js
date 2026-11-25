@@ -1,5 +1,43 @@
 'use strict';
 const BallTracking = (() => {
+  // Input is ordered, normalized ball detections. A segment change is a
+  // tracking break. A new flight must earn its own evidence after each break.
+  function rallyWindows(points) {
+    const windows = [];
+    const lookback = 0.20, settle = 0.35;
+    let anchor = 0, start = null, lastMoving = null;
+    function close() {
+      if (start !== null) windows.push({start, end: lastMoving});
+      start = null;
+      lastMoving = null;
+    }
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i], previous = points[i - 1];
+      if (!previous || point.segment !== previous.segment ||
+          point.time - previous.time > 0.081 || point.time <= previous.time) {
+        close();
+        anchor = i;
+      }
+      while (anchor + 1 < i && points[anchor + 1].time <= point.time - lookback) anchor++;
+      const first = points[anchor];
+      if (point.time - first.time < lookback - 1e-6) continue;
+      const distance = Math.hypot(point.x - first.x, point.y - first.y);
+      // Require progress across both halves. A one-frame coordinate glitch
+      // can exceed the endpoint threshold, but has no intermediate flight.
+      const middle = points[Math.floor((anchor + i) / 2)];
+      const dx = point.x - first.x, dy = point.y - first.y;
+      const progress = (middle.x - first.x) * dx + (middle.y - first.y) * dy;
+      if (distance >= 0.055 && progress > .12 * distance ** 2 && progress < .88 * distance ** 2) {
+        if (start === null) start = first.time;
+        lastMoving = point.time;
+      } else if (lastMoving !== null && point.time - lastMoving > settle) {
+        close();
+      }
+    }
+    close();
+    return windows;
+  }
+
   function extract(points, windows) {
     const events=[];
     let cursor=0;
@@ -45,5 +83,5 @@ const BallTracking = (() => {
     const limit=n=>Math.min(5,Math.max(0,Number(n)||0));
     return [Math.max(0,play.start-limit(before)),Math.min(duration,play.end+limit(after))];
   }
-  return {extract,bounds};
+  return {extract,bounds,rallyWindows};
 })();

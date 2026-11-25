@@ -40,3 +40,26 @@ assert.equal(tracker.extract(carried,warmupWindow).length,0,'slowly carried ball
 const flight=carried.map((point,i)=>({...point,x:0.4+i*0.012}));
 assert.equal(tracker.extract(flight,warmupWindow)[0].type,'Unclassified play');
 console.log('PASS: no-ball and carried-ball controls, classify-later flight');
+
+const track = (n, x, start=0, segment=1) =>
+  Array.from({length:n}, (_,i)=>({time:start+i/25,x:x(i),y:.5,segment}));
+const moving = i=>.15+i*.018;
+assert.equal(tracker.rallyWindows(track(50,i=>.4+(i%2)*.003)).length,0,'stationary ball with jitter');
+assert.equal(tracker.rallyWindows(track(40,i=>.2+i*.002)).length,0,'slow carry');
+assert.equal(tracker.rallyWindows(track(4,moving)).length,0,'brief isolated motion');
+const finish = track(14,moving);
+assert.equal(tracker.rallyWindows(finish)[0].end,finish.at(-1).time,'flush flight at EOF');
+const restart = finish.concat(track(14,moving,2,2));
+assert.equal(tracker.rallyWindows(restart).length,2,'loss splits flights');
+const still = track(30,()=>finish.at(-1).x,.56);
+const resumed = track(16,i=>finish.at(-1).x+i*.018,1.76);
+const split = tracker.rallyWindows(finish.concat(still,resumed));
+assert.equal(split.length,2,'settled ball separates subsequent flight');
+assert.ok(split[0].end<1 && split[1].start>1.4,'omit dead time');
+console.log('PASS: jitter, carry, brief motion, tracking loss, settling, restart and EOF');
+
+const scanEvents = points=>tracker.extract(points,tracker.rallyWindows(points));
+const spike = track(20,i=>i===7?.50:.40);
+assert.ok(tracker.extract(spike,[{start:0,end:.76}]).length,'old extractor flags one-frame jump');
+assert.equal(scanEvents(spike).length,0,'one-frame jump cannot generate a review event');
+assert.ok(scanEvents(finish).some(e=>e.type==='Unclassified play'),'retain sustained flight suggestions');
