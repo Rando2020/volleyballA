@@ -1,0 +1,7 @@
+# Optional local volleyball action suggestions
+
+Set `BALLTIME_ACTION_WEIGHTS` in the project .env to the path of a trusted, locally installed Ultralytics YOLO .pt action detector, then restart the backend and analyze a video. A relative path starts at the volley-local directory. The ordinary person and ball detector still uses `BALLTIME_WEIGHTS`. The action adapter reads the checkpoint's class names. Supported names include serve/service, receive/reception, set, spike/attack, and block. The default confidence threshold is 0.5. Set `action_confidence` in config.yaml to change it.
+
+Open `/api/matches/{id}/action-suggestions` on the local backend once the match is ready. Each sample includes a one-based rally number, seconds from the beginning of the original video, action, detector confidence, and a normalized left/top/right/bottom box. Consecutive samples can describe the same touch. These samples do not change saved tags or player statistics. A completed analysis with zero samples, a disabled model, and a match analyzed before reports were introduced have distinct responses.
+
+The optional adapter follows the action detection approach in [volleyball_analytics](https://github.com/masouduut94/volleyball_analytics), using this app's ball-motion rally segmentation to choose frames. Model weights are supplied separately. [OVML](https://github.com/openvolley/ovml) provides a separate experimental ball detector for comparison. The app does not execute R or download models during analysis.

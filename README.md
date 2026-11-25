@@ -43,3 +43,19 @@ Analyze samples at 25 frames per second and processes nine grayscale frames at a
 Games can have a pool/bracket stage, number, and YouTube link. Mark game starts on a multi-game video to assign clips by timestamp. A channel link is a bookmark. Import a local video for scanning. Use a clip's player selector to attribute a contact to the roster. Select a serve result or confirm an event directly on the clip card.
 
 Run node tracking-test.mjs alongside the existing logic and browser checks.
+
+## CourtSense Local
+
+The [desktop studio](volley-local/README.md) includes local ball and player tracking, coaching stats, a playable demo and clip exports. On Windows, open Start-CourtSense.cmd inside volley-local. The browser edition lives in dist/.
+
+
+## Open-source tools
+
+The four upstream projects are pinned under `third_party/`. Fetch their source with `git submodule update --init` after cloning. Each project retains its upstream license and installation instructions.
+
+| Project | Use in CourtSense |
+| --- | --- |
+| [Sportvision](third_party/sportvision) | Design reference for tagging alongside the video. |
+| [VAA](third_party/VAA) | Inspired Q/E navigation between tagged plays in the browser source. |
+| [volleyball_analytics](third_party/volleyball_analytics) | Informed the optional local action detector. Supply compatible weights as described in [Action suggestions](volley-local/ACTION-SUGGESTIONS.md). |
+| [OVML](third_party/ovml) | Candidate for future detector benchmarking. The browser presently uses VballNetFastV1. |

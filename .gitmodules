@@ -1,0 +1,12 @@
+[submodule "third_party/sportvision"]
+	path = third_party/sportvision
+	url = https://github.com/napo/sportvision.git
+[submodule "third_party/VAA"]
+	path = third_party/VAA
+	url = https://github.com/asigatchov/VAA.git
+[submodule "third_party/volleyball_analytics"]
+	path = third_party/volleyball_analytics
+	url = https://github.com/masouduut94/volleyball_analytics.git
+[submodule "third_party/ovml"]
+	path = third_party/ovml
+	url = https://github.com/openvolley/ovml.git

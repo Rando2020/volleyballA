@@ -5,6 +5,33 @@
 
   let restoredDetail=false;
 
+  function jumpToTag(direction) {
+    if (busy) return toast('Wait until clip export finishes.');
+    if (!media || sample || !Number.isFinite(video.duration)) return toast('Load your match footage first.');
+    const eligible = plays.filter(p => p.mediaId === media.id && !p.suggested &&
+      Number.isFinite(p.start) && p.start >= 0 && p.start < video.duration &&
+      direction * (p.start - video.currentTime) > 0.001);
+    eligible.sort((a, b) => direction * (a.start - b.start));
+    const target = eligible[0];
+    if (!target) return toast(direction > 0 ? 'No later confirmed play.' : 'No earlier confirmed play.');
+    video.pause();
+    clipEnd = null;
+    video.currentTime = target.start;
+    toast(target.player + ' at ' + time(target.start));
+  }
+  $('previousTag').onclick = () => jumpToTag(-1);
+  $('nextTag').onclick = () => jumpToTag(1);
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey ||
+        event.shiftKey || $('review').hidden || event.target.isContentEditable ||
+        event.target.closest?.('input, textarea, select, [role="textbox"]')) return;
+    const key = event.key.toLowerCase();
+    if (key === 'q' || key === 'e') {
+      event.preventDefault();
+      jumpToTag(key === 'q' ? -1 : 1);
+    }
+  });
+
   const now=()=>performance.now();
   const seconds=ms=>(ms/1000).toFixed(1)+' s';
   let windows = [];

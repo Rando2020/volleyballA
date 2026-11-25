@@ -1,0 +1,29 @@
+paths:
+  data: ./data
+  database: volley.sqlite3
+  uploads: uploads
+  clips: clips
+  thumbs: thumbs
+  exports: exports
+  weights: models/yolov8n.pt
+  volleyball_weights: models/vballnet.onnx
+  action_weights: null
+  frontend: frontend/dist
+  ffmpeg: ffmpeg
+  ffprobe: ffprobe
+target_fps: 8
+frame_width: 960
+movement_window_s: 3
+min_motion_s: 0.75
+motion_threshold: 0.002
+max_step: 0.35
+end_gap_s: 5
+merge_gap_s: 2
+pre_roll_s: 1
+post_roll_s: 2
+ball_confidence: 0.18
+batch_size: 4
+inference_size: 960
+
+# Select yolo or vballnet. VballNet expects approximately 25 FPS.
+ball_detector: yolo
