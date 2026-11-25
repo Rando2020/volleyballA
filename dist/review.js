@@ -329,11 +329,10 @@
       estimates.push(...await detector.flush());
       if(token!==generation)return;
 
-      const flights=[],validPoints=[];
+      const validPoints=[];
       let sequence=[],segment=0;
       function finish(){
         if(sequence.length>=3){
-          flights.push({start:sequence[0].time,end:sequence.at(-1).time});
           for(const p of sequence){p.segment=segment;validPoints.push(p);}
         }
         segment++;sequence=[];
@@ -351,7 +350,7 @@
         const nearby=f.bodies.map(q=>({id:q.id,d:Math.hypot(q.x-p.x,(q.y-p.y-0.045)*0.8)})).sort((a,b)=>a.d-b.d);
         if(nearby[0]?.d<0.13 && (!nearby[1]||nearby[1].d-nearby[0].d>0.035))contactTracks.set(p.time,nearby[0].id);
       }
-      const detected=BallTracking.extract(validPoints,flights).map(event=>({
+      const detected=BallTracking.extract(validPoints,BallTracking.rallyWindows(validPoints)).map(event=>({
         ...event,start:Math.max(0,event.at-0.6),end:Math.min(duration,event.at+1.2)
       }));
       const confirmed=plays.filter(p=>p.mediaId===media.id && p.scanKey && !p.suggested);

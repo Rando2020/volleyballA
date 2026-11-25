@@ -57,3 +57,9 @@ const split = tracker.rallyWindows(finish.concat(still,resumed));
 assert.equal(split.length,2,'settled ball separates subsequent flight');
 assert.ok(split[0].end<1 && split[1].start>1.4,'omit dead time');
 console.log('PASS: jitter, carry, brief motion, tracking loss, settling, restart and EOF');
+
+const scanEvents = points=>tracker.extract(points,tracker.rallyWindows(points));
+const spike = track(20,i=>i===7?.50:.40);
+assert.ok(tracker.extract(spike,[{start:0,end:.76}]).length,'old extractor flags one-frame jump');
+assert.equal(scanEvents(spike).length,0,'one-frame jump cannot generate a review event');
+assert.ok(scanEvents(finish).some(e=>e.type==='Unclassified play'),'retain sustained flight suggestions');

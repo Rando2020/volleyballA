@@ -22,7 +22,12 @@ const BallTracking = (() => {
       const first = points[anchor];
       if (point.time - first.time < lookback - 1e-6) continue;
       const distance = Math.hypot(point.x - first.x, point.y - first.y);
-      if (distance >= 0.055) {
+      // Require progress across both halves. A one-frame coordinate glitch
+      // can exceed the endpoint threshold, but has no intermediate flight.
+      const middle = points[Math.floor((anchor + i) / 2)];
+      const dx = point.x - first.x, dy = point.y - first.y;
+      const progress = (middle.x - first.x) * dx + (middle.y - first.y) * dy;
+      if (distance >= 0.055 && progress > .12 * distance ** 2 && progress < .88 * distance ** 2) {
         if (start === null) start = first.time;
         lastMoving = point.time;
       } else if (lastMoving !== null && point.time - lastMoving > settle) {
